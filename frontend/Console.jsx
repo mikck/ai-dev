@@ -1,16 +1,16 @@
-import {useCallback, useEffect, useState} from 'react';
+import {Fragment, useCallback, useEffect, useRef, useState} from 'react';
 import {createRoot} from 'react-dom/client';
 import '@astryxdesign/core/reset.css';
 import '@astryxdesign/core/astryx.css';
 import {Button} from '@astryxdesign/core/Button';
 import {Heading} from '@astryxdesign/core/Heading';
 import {HStack} from '@astryxdesign/core/HStack';
-import {Layout, LayoutContent, LayoutHeader, LayoutPanel} from '@astryxdesign/core/Layout';
 import {Text} from '@astryxdesign/core/Text';
 import {VStack} from '@astryxdesign/core/VStack';
 import {Theme} from '@astryxdesign/core/theme';
 import {Executors, WorkspaceSettings} from './Workflow.jsx';
 import {themes, defaultThemeSlug} from '../astryx-themes.js';
+import './console.css';
 
 const states = {
   queued_plan: '等待生成计划', planning: '生成计划中', awaiting_approval: '待审核',
@@ -29,17 +29,37 @@ async function request(path, payload) {
   return result;
 }
 
-function Artifact({artifact}) {
-  const {files = [], ...metadata} = artifact;
-  return <>
+function Artifact({artifact, repositories}) {
+  const {files = [], output, commits, reviews, decision, note, return_to: returnTo, error, ...metadata} = artifact;
+  const repoName = id => repositories.find(repo => repo.id === id)?.url.split('/').at(-1).replace(/\.git$/, '') || id;
+  const decisionLabels = {approved: '已通过', rejected: '已终止', returned: '已退回'};
+  return <VStack gap={2}>
+    {output && <pre className="console-output">{output}</pre>}
+    {error && <p className="console-error">{error}</p>}
+    {(decision || note) && <p>{[decisionLabels[decision] || decision, note].filter(Boolean).join(' · ')}</p>}
+    {returnTo && <Text type="supporting">退回节点：{returnTo}</Text>}
     {files.map(file => <details key={file.repository + '/' + file.path}>
       <summary>{file.path} · {file.repository}</summary>
-      <pre style={{whiteSpace: 'pre-wrap', overflowWrap: 'anywhere'}}>{file.content}</pre>
+      <pre className="console-output">{file.content}</pre>
     </details>)}
-    {Object.keys(metadata).length > 0 && <pre style={{whiteSpace: 'pre-wrap', overflowWrap: 'anywhere'}}>
-      {JSON.stringify(metadata, null, 2)}
-    </pre>}
-  </>;
+    {Object.keys(commits || {}).length > 0 && <dl className="console-commits">
+      {Object.entries(commits).map(([id, sha]) => <Fragment key={id}>
+        <dt>{repoName(id)}</dt>
+        <dd><code title={sha}>{sha.slice(0, 12)}</code></dd>
+      </Fragment>)}
+    </dl>}
+    {Object.keys(reviews || {}).length > 0 && <ul className="console-repo-results">
+      {Object.entries(reviews).map(([id, link]) => <li key={id}>
+        {repoName(id)}{' '}
+        {/^(https:\/\/(github|gitlab)\.com\/)/.test(link)
+          ? <a href={link} target="_blank" rel="noreferrer">查看评审</a> : link}
+      </li>)}
+    </ul>}
+    {Object.keys(metadata).length > 0 && <details>
+      <summary>其他执行信息</summary>
+      <pre className="console-output">{JSON.stringify(metadata, null, 2)}</pre>
+    </details>}
+  </VStack>;
 }
 
 function ReviewForm({detail, pending, onReview}) {
@@ -69,6 +89,164 @@ function ReviewForm({detail, pending, onReview}) {
   </form>;
 }
 
+const navigation = [
+  {id: 'requirements', label: '需求与仓库'},
+  {id: 'reviews', label: '待审核', needsWorkspace: true},
+  {id: 'settings', label: 'Workspace 配置', needsWorkspace: true},
+  {id: 'executors', label: '执行器'},
+];
+
+const nodeStates = {
+  pending: '等待依赖', ready: '已排队', running: '执行中', review: '待审核',
+  done: '已完成', rejected: '已驳回', failed: '失败',
+};
+
+function Status({value, labels = states}) {
+  const tone = /failed|rejected/.test(value) ? 'error'
+    : /review|approval/.test(value) ? 'review'
+    : /delivered|done/.test(value) ? 'success'
+    : /running|planning|executing/.test(value) ? 'active' : 'neutral';
+  return <strong className="console-status" data-tone={tone}>{labels[value] || value}</strong>;
+}
+
+function Requirements({workspace, repositories, requirements, publishedSOPs, pending,
+  form, setForm, opened, setOpened, submit, openSettings}) {
+  return <>
+    {(!workspace || form === 'workspace') && <section className="console-panel console-section">
+      <form onSubmit={event => submit(event, '/api/workspaces')}>
+        <VStack gap={3}>
+          <Heading level={3}>创建 Workspace</Heading>
+          <label>Workspace 名称 <input name="name" autoFocus={form === 'workspace'} required /></label>
+          <HStack gap={2} wrap="wrap">
+            <Button label="创建 workspace" variant="primary" type="submit" isDisabled={pending} />
+            {workspace && <Button label="取消" onClick={() => setForm('')} />}
+          </HStack>
+        </VStack>
+      </form>
+    </section>}
+    {workspace && <>
+      {form === 'requirement' && <section className="console-panel console-section">
+        <form key={workspace} onSubmit={event => submit(event, '/api/requirements', {workspace})}>
+          <VStack gap={3}>
+            <Heading level={3}>新建需求</Heading>
+            <label>标题 <input name="title" autoFocus required /></label>
+            <label>需求说明 <textarea name="description" rows={3} required /></label>
+            <input type="hidden" name="engine" value="codex" />
+            <label>SOP <select name="sop" defaultValue="" required>
+              <option value="">选择已发布 SOP</option>
+              {publishedSOPs.map(sop => <option key={sop.id} value={sop.id}>
+                {sop.published_name} · v{sop.published_version}
+              </option>)}
+            </select></label>
+            <fieldset><legend>关联仓库</legend>
+              <VStack gap={1}>{repositories.map(repo => <label key={repo.id}>
+                <input type="checkbox" name="repositories" value={repo.id} /> {repo.url}
+              </label>)}</VStack>
+            </fieldset>
+            <HStack gap={2} wrap="wrap">
+              <Button label="提交需求" variant="primary" type="submit" isDisabled={pending} />
+              <Button label="取消" onClick={() => setForm('')} />
+            </HStack>
+          </VStack>
+        </form>
+      </section>}
+      <section className="console-panel" aria-label="需求列表">
+        <header className="console-panel-heading"><Heading level={3}>需求列表</Heading></header>
+        {requirements.length > 0 ? <table className="console-table">
+          <thead><tr><th scope="col">需求</th><th scope="col">SOP 或执行工具</th><th scope="col">状态</th></tr></thead>
+          <tbody>{requirements.map(item => <tr key={item.id} data-selected={opened === item.id}>
+            <td><Button label={item.title} variant="ghost" onClick={() => setOpened(item.id)} /></td>
+            <td data-label="SOP 或执行工具">{item.sop || (item.engine === 'claude' ? 'Claude Code' : 'Codex')}</td>
+            <td data-label="状态"><Status value={item.status} /></td>
+          </tr>)}</tbody>
+        </table> : <p className="console-empty">{!repositories.length ? '登记仓库后可提交需求。'
+          : !publishedSOPs.length ? '在 Workspace 配置中发布 SOP 后可提交需求。' : '暂无需求。'}</p>}
+      </section>
+      <section className="console-panel" aria-label="代码仓库">
+        <header className="console-panel-heading">
+          <Heading level={3}>代码仓库</Heading>
+          <Button label="管理仓库" size="sm" onClick={openSettings} />
+        </header>
+        {repositories.length > 0 ? <table className="console-table">
+          <thead><tr><th scope="col">仓库地址</th><th scope="col">平台</th><th scope="col">目标分支</th></tr></thead>
+          <tbody>{repositories.map(repo => <tr key={repo.id}>
+            <td><a href={repo.url.replace(/\.git$/, '')} target="_blank" rel="noreferrer">
+              {repo.url.replace(/^https:\/\/(github|gitlab)\.com\//, '').replace(/\.git$/, '')}
+            </a></td>
+            <td data-label="平台">{repo.provider === 'github' ? 'GitHub' : 'GitLab'}</td>
+            <td data-label="目标分支"><code>{repo.base}</code></td>
+          </tr>)}</tbody>
+        </table> : <p className="console-empty">暂无仓库。</p>}
+      </section>
+    </>}
+  </>;
+}
+
+function RequirementDetail({detail, pending, mutate, setError, onClose}) {
+  const panel = useRef(null);
+  useEffect(() => {
+    if (window.matchMedia('(max-width: 68rem)').matches) {
+      panel.current?.focus();
+      panel.current?.scrollIntoView({block: 'start'});
+    }
+  }, [detail.id]);
+  return (
+      <aside className="console-panel console-section console-detail" aria-label="需求详情" tabIndex={-1} ref={panel}>
+        <VStack gap={3}>
+          <HStack gap={2} vAlign="center" wrap="wrap">
+            <Heading level={2}>{detail.title}</Heading>
+            <Button label="关闭详情" variant="ghost" onClick={onClose} />
+          </HStack>
+          <Status value={detail.status} />
+          <Text>{detail.description}</Text>
+          {detail.sop && <VStack gap={2}>
+            <Heading level={3}>{detail.sop}{detail.sop_version ? ` · v${detail.sop_version}` : ''}</Heading>
+            <ol className="console-timeline">{detail.nodes.map(node => <li key={node.id}>
+              <HStack gap={2} wrap="wrap" vAlign="center"><Text>{node.name}</Text>
+                <Status value={node.status} labels={nodeStates} />
+              </HStack>
+              {node.prompt && <Text>{node.prompt}</Text>}
+              {node.attempts?.length > 0 && <details><summary>执行记录（{node.attempts.length}）</summary>
+                <ol reversed>{node.attempts.map((attempt, index) => <li key={attempt.id}>
+                  <details><summary>第 {node.attempts.length - index} 次 · {{
+                    done: '完成', failed: '失败', returned: '退回', rejected: '终止',
+                  }[attempt.status] || attempt.status}</summary>
+                    <Artifact artifact={attempt.artifact || {}} repositories={detail.targets} />
+                  </details>
+                </li>)}</ol>
+              </details>}
+              {!node.attempts?.length && node.artifact && <details><summary>查看节点产物</summary>
+                <Artifact artifact={node.artifact} repositories={detail.targets} />
+              </details>}
+            </li>)}</ol>
+            {detail.status === 'sop_review' && <ReviewForm key={detail.id + '/' + detail.review_node} detail={detail} pending={pending}
+              onReview={payload => payload
+                ? mutate('/api/requirements/' + detail.id + '/review', payload)
+                : setError('请选择返工节点并填写审核意见')} />}
+          </VStack>}
+          {detail.plan && <section><Heading level={3}>AI 计划</Heading>
+            <pre className="console-output">{detail.plan}</pre>
+          </section>}
+          {detail.log && <section><Heading level={3}>执行结果</Heading>
+            <pre className="console-output">{detail.log}</pre>
+          </section>}
+          <Heading level={3}>仓库与交付结果</Heading>
+          <ul className="console-repo-results">{detail.targets.map(repo => (
+            <li key={repo.id}>{repo.url}{' '}
+              {repo.review ? <a href={repo.review} target="_blank" rel="noreferrer">
+                {repo.provider === 'github' ? '查看 PR' : '查看 MR'}
+              </a> : '待发布'}
+            </li>
+          ))}</ul>
+          {detail.status === 'awaiting_approval' && <Button label="批准并执行" variant="primary"
+            isDisabled={pending} onClick={() => mutate('/api/requirements/' + detail.id + '/approve', {})} />}
+          {(detail.status.startsWith('failed_') || detail.status === 'sop_failed') && <Button label="重试" isDisabled={pending}
+            onClick={() => mutate('/api/requirements/' + detail.id + '/retry', {})} />}
+        </VStack>
+      </aside>
+  );
+}
+
 function Console() {
   const [data, setData] = useState({workspaces: [], repositories: [], requirements: []});
   const [selected, setSelected] = useState('');
@@ -77,6 +255,7 @@ function Console() {
   const [error, setError] = useState('');
   const [pending, setPending] = useState(false);
   const [tab, setTab] = useState('requirements');
+  const [form, setForm] = useState('');
   const [workspaceData, setWorkspaceData] = useState(null);
   const [executors, setExecutors] = useState([]);
   const [reviewData, setReviewData] = useState(null);
@@ -135,7 +314,10 @@ function Console() {
       if (tab === 'executors') setExecutors(await request('/api/executors'));
       if (tab === 'reviews' && workspace) setReviewData({workspace,
         inbox: await request('/api/workspaces/' + workspace + '/reviews')});
-      form?.reset();
+      if (form) {
+        form.reset();
+        setForm('');
+      }
       if (path === '/api/workspaces') {
         setSelected(result.id);
         setOpened('');
@@ -161,156 +343,76 @@ function Console() {
     mutate(path, payload, event.currentTarget);
   }
 
+  const page = navigation.find(entry => entry.id === tab);
+  const showDetail = detail?.id === opened && (tab === 'requirements' || tab === 'reviews');
+
   return (
-    <Layout header={
-      <LayoutHeader hasDivider padding={0}>
-        <HStack gap={3} wrap="wrap" padding={4} vAlign="center">
+    <section className="console-shell">
+      <aside className="console-sidebar">
+        <header className="console-brand">
+          <b aria-hidden="true">A</b>
           <Heading level={1}>需求交付平台</Heading>
-          {data.workspaces.length > 0 && <label>Workspace{' '}
+        </header>
+        <nav className="console-navigation" aria-label="控制台导航">
+          {navigation.map(entry => <Button key={entry.id} label={entry.label} variant="ghost"
+            aria-current={tab === entry.id ? 'page' : undefined}
+            isDisabled={entry.needsWorkspace && !workspace}
+            onClick={() => setTab(entry.id)} />)}
+        </nav>
+      </aside>
+      <section className="console-main">
+        <header className="console-topbar">
+          {workspace && <label>Workspace
             <select value={workspace} onChange={event => {
               setSelected(event.target.value);
               setOpened('');
               setDetail(null);
+              setForm('');
             }}>
               {data.workspaces.map(entry => <option value={entry.id} key={entry.id}>{entry.name}</option>)}
             </select>
           </label>}
-        </HStack>
-      </LayoutHeader>
-    } end={(tab === 'requirements' || tab === 'reviews') && detail && detail.id === opened && (
-      <LayoutPanel padding={4} label="需求详情" role="complementary">
-        <VStack gap={3}>
-          <HStack gap={2} vAlign="center" wrap="wrap">
-            <Heading level={2}>{detail.title}</Heading>
-            <Button label="关闭详情" variant="ghost" onClick={() => {setOpened(''); setDetail(null);}} />
-          </HStack>
-          <Text>{states[detail.status]}</Text>
-          <Text>{detail.description}</Text>
-          {detail.sop && <VStack gap={2}>
-            <Heading level={3}>{detail.sop}{detail.sop_version ? ` · v${detail.sop_version}` : ''}</Heading>
-            <ol>{detail.nodes.map(node => <li key={node.id}>
-              <Text>{node.name} · {{pending: '等待依赖', ready: '已排队', running: '执行中', review: '待审核',
-                done: '已完成', rejected: '已驳回', failed: '失败'}[node.status]}</Text>
-              {node.prompt && <Text>{node.prompt}</Text>}
-              {node.attempts?.length > 0 && <details><summary>执行记录（{node.attempts.length}）</summary>
-                <ol reversed>{node.attempts.map((attempt, index) => <li key={attempt.id}>
-                  <details><summary>第 {node.attempts.length - index} 次 · {{
-                    done: '完成', failed: '失败', returned: '退回', rejected: '终止',
-                  }[attempt.status] || attempt.status}</summary>
-                    <Artifact artifact={attempt.artifact || {}} />
-                  </details>
-                </li>)}</ol>
-              </details>}
-              {!node.attempts?.length && node.artifact && <details><summary>查看节点产物</summary>
-                <Artifact artifact={node.artifact} />
-              </details>}
-            </li>)}</ol>
-            {detail.status === 'sop_review' && <ReviewForm key={detail.id + '/' + detail.review_node} detail={detail} pending={pending}
-              onReview={payload => payload
-                ? mutate('/api/requirements/' + detail.id + '/review', payload)
-                : setError('请选择返工节点并填写审核意见')} />}
-          </VStack>}
-          {detail.plan && <section><Heading level={3}>AI 计划</Heading>
-            <pre style={{whiteSpace: 'pre-wrap', overflowWrap: 'anywhere'}}>{detail.plan}</pre>
-          </section>}
-          {detail.log && <section><Heading level={3}>执行结果</Heading>
-            <pre style={{whiteSpace: 'pre-wrap', overflowWrap: 'anywhere'}}>{detail.log}</pre>
-          </section>}
-          <Heading level={3}>仓库与交付结果</Heading>
-          <ul>{detail.targets.map(repo => (
-            <li key={repo.id}>{repo.url}{' '}
-              {repo.review ? <a href={repo.review} target="_blank" rel="noreferrer">
-                {repo.provider === 'github' ? '查看 PR' : '查看 MR'}
-              </a> : '待发布'}
-            </li>
-          ))}</ul>
-          {detail.status === 'awaiting_approval' && <Button label="批准并执行" variant="primary"
-            isDisabled={pending} onClick={() => mutate('/api/requirements/' + detail.id + '/approve', {})} />}
-          {(detail.status.startsWith('failed_') || detail.status === 'sop_failed') && <Button label="重试" isDisabled={pending}
-            onClick={() => mutate('/api/requirements/' + detail.id + '/retry', {})} />}
-        </VStack>
-      </LayoutPanel>
-    )}>
-      <LayoutContent padding={4} isScrollable>
-        <VStack gap={4}>
-          <HStack gap={2} wrap="wrap">
-            <Button label="需求与仓库" variant={tab === 'requirements' ? 'primary' : 'ghost'} onClick={() => setTab('requirements')} />
-            <Button label="待审核" variant={tab === 'reviews' ? 'primary' : 'ghost'}
-              isDisabled={!workspace} onClick={() => setTab('reviews')} />
-            <Button label="Workspace 配置" variant={tab === 'settings' ? 'primary' : 'ghost'}
-              isDisabled={!workspace} onClick={() => setTab('settings')} />
-            <Button label="执行器" variant={tab === 'executors' ? 'primary' : 'ghost'} onClick={() => setTab('executors')} />
-          </HStack>
-          {error && <p role="alert">{error}</p>}
-          {tab === 'reviews' && <VStack as="section" gap={2}>
-            <Heading level={2}>待审核</Heading>
-            {inbox.length === 0 && <Text>当前 workspace 暂无待审核需求</Text>}
-            {inbox.length > 0 && <table>
-              <thead><tr><th scope="col">需求</th><th scope="col">SOP</th><th scope="col">审核节点</th></tr></thead>
-              <tbody>{inbox.map(item => <tr key={item.id}>
-                <td><Button label={item.title} variant="ghost" onClick={() => setOpened(item.id)} /></td>
-                <td>{item.sop}{item.version ? ` · v${item.version}` : ''}</td>
-                <td>{item.node_name}</td>
-              </tr>)}</tbody>
-            </table>}
-          </VStack>}
-          {tab === 'settings' && workspace && <WorkspaceSettings key={workspace} workspace={workspace}
-            setup={setup} request={request} refresh={refreshSetup} />}
-          {tab === 'executors' && <Executors entries={executors} onManage={mutate} />}
-          {tab === 'requirements' && <>
-          <form onSubmit={event => submit(event, '/api/workspaces')}>
-            <HStack gap={2} vAlign="center" wrap="wrap">
-              <label>Workspace 名称 <input name="name" required /></label>
-              <Button label="创建 workspace" type="submit" isDisabled={pending} />
-            </HStack>
-          </form>
-          {workspace && <>
-            <Heading level={2}>仓库</Heading>
-            {repositories.length > 0 && <ul>{repositories.map(repo => (
-              <li key={repo.id}>{repo.url} · {repo.base}</li>
-            ))}</ul>}
-            <form onSubmit={event => submit(event, '/api/repositories', {workspace})}>
-              <HStack gap={2} vAlign="center" wrap="wrap">
-                <label>平台 <select name="provider"><option value="github">GitHub</option>
-                  <option value="gitlab">GitLab</option></select></label>
-                <label>HTTPS 地址 <input name="url" type="url" required /></label>
-                <label>目标分支 <input name="base" defaultValue="main" required /></label>
-                <label>验证命令 <input name="verify" /></label>
-                <Button label="登记仓库" type="submit" isDisabled={pending} />
-              </HStack>
-            </form>
-            <Heading level={2}>需求</Heading>
-            {requirements.length > 0 && <table>
-              <thead><tr><th scope="col">标题</th><th scope="col">执行工具</th><th scope="col">状态</th></tr></thead>
-              <tbody>{requirements.map(item => <tr key={item.id}>
-                <td><Button label={item.title} variant="ghost" onClick={() => setOpened(item.id)} /></td>
-                <td>{item.status.startsWith('sop_') || item.sop ? '按 SOP' : item.engine === 'claude' ? 'Claude Code' : 'Codex'}</td>
-                <td>{states[item.status]}</td>
-              </tr>)}</tbody>
-            </table>}
-            {repositories.length > 0 && <form key={workspace}
-              onSubmit={event => submit(event, '/api/requirements', {workspace})}>
-              <VStack gap={2}>
-                <label>标题 <input name="title" required /></label>
-                <label>需求说明 <textarea name="description" required /></label>
-                <input type="hidden" name="engine" value="codex" />
-                <label>SOP <select name="sop" defaultValue="" required>
-                  <option value="">{publishedSOPs.length ? '选择已发布 SOP' : '请先发布 SOP'}</option>
-                  {publishedSOPs.map(sop => <option key={sop.id} value={sop.id}>{sop.published_name} · v{sop.published_version}</option>)}
-                </select></label>
-                <fieldset><legend>关联仓库</legend>
-                  <VStack gap={1}>{repositories.map(repo => <label key={repo.id}>
-                    <input type="checkbox" name="repositories" value={repo.id} /> {repo.url}
-                  </label>)}</VStack>
-                </fieldset>
-                <HStack><Button label="提交需求" variant="primary" type="submit" isDisabled={pending} /></HStack>
-              </VStack>
-            </form>}
-          </>}
-          </>}
-        </VStack>
-      </LayoutContent>
-    </Layout>
+          <Button label="新建 Workspace" size="sm" onClick={() => {
+            setTab('requirements');
+            setForm(current => current === 'workspace' ? '' : 'workspace');
+          }} />
+        </header>
+        <section className="console-body">
+          <header className="console-page-heading">
+            <Heading level={2}>{page.label}</Heading>
+            {tab === 'requirements' && workspace && <Button label="新建需求" variant="primary"
+              aria-expanded={form === 'requirement'} isDisabled={!repositories.length || !publishedSOPs.length}
+              onClick={() => setForm(current => current === 'requirement' ? '' : 'requirement')} />}
+          </header>
+          {error && <p className="console-error" role="alert">{error}</p>}
+          <section className={showDetail ? 'console-columns with-detail' : 'console-columns'}>
+            <VStack gap={4} className="console-content">
+              {tab === 'requirements' && <Requirements
+                workspace={workspace} repositories={repositories} requirements={requirements}
+                publishedSOPs={publishedSOPs} pending={pending} form={form} setForm={setForm}
+                opened={opened} setOpened={setOpened} submit={submit} openSettings={() => setTab('settings')} />}
+              {tab === 'reviews' && <section className="console-panel">
+                {inbox.length === 0 ? <p className="console-empty">当前 Workspace 暂无待审核需求</p> :
+                  <table className="console-table review-table">
+                    <thead><tr><th scope="col">需求</th><th scope="col">SOP</th><th scope="col">审核节点</th></tr></thead>
+                    <tbody>{inbox.map(item => <tr key={item.id} data-selected={opened === item.id}>
+                      <td><Button label={item.title} variant="ghost" onClick={() => setOpened(item.id)} /></td>
+                      <td data-label="SOP">{item.sop}{item.version ? ` · v${item.version}` : ''}</td>
+                      <td data-label="审核节点">{item.node_name}</td>
+                    </tr>)}</tbody>
+                  </table>}
+              </section>}
+              {tab === 'settings' && workspace && <WorkspaceSettings key={workspace} workspace={workspace}
+                setup={setup} repositories={repositories} request={request} refresh={refreshSetup}
+                refreshRepositories={async () => setData(await request('/api'))} />}
+              {tab === 'executors' && <Executors entries={executors} onManage={mutate} />}
+            </VStack>
+            {showDetail && <RequirementDetail detail={detail} pending={pending} mutate={mutate}
+              setError={setError} onClose={() => {setOpened(''); setDetail(null);}} />}
+          </section>
+        </section>
+      </section>
+    </section>
   );
 }
 

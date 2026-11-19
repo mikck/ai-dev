@@ -56,3 +56,16 @@ CREATE TABLE IF NOT EXISTS step_attempts (
 );
 CREATE INDEX IF NOT EXISTS step_attempts_requirement ON step_attempts(requirement, node, id);
 CREATE TABLE IF NOT EXISTS migrations (name TEXT PRIMARY KEY);
+CREATE TABLE IF NOT EXISTS archived_repositories (
+    id TEXT PRIMARY KEY REFERENCES repositories ON DELETE CASCADE
+);
+CREATE TABLE IF NOT EXISTS archived_sops (
+    id TEXT PRIMARY KEY REFERENCES sops ON DELETE CASCADE,
+    name TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS target_settings (
+    requirement TEXT NOT NULL, repository TEXT NOT NULL,
+    provider TEXT NOT NULL, url TEXT NOT NULL, base TEXT NOT NULL, verify TEXT NOT NULL,
+    PRIMARY KEY(requirement, repository),
+    FOREIGN KEY(requirement, repository) REFERENCES targets(requirement, repository)
+);

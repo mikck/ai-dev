@@ -1,0 +1,487 @@
+.console-shell {
+  --console-ink: var(--color-text-primary);
+  --console-secondary: var(--color-text-secondary);
+  --console-panel: var(--color-background-surface);
+  --console-canvas: color-mix(in srgb, var(--color-background-blue) 14%, var(--color-background-body));
+  --console-border: var(--color-border);
+  --console-blue: var(--color-text-blue);
+  --console-rail: color-mix(in srgb, var(--color-background-inverted) 80%, var(--console-blue));
+  display: grid;
+  grid-template-columns: 14rem minmax(0, 1fr);
+  min-block-size: 100dvh;
+  color: var(--console-ink);
+  background: var(--console-canvas);
+}
+
+.console-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-6);
+  position: sticky;
+  inset-block-start: 0;
+  align-self: start;
+  min-block-size: 100dvh;
+  padding: var(--spacing-5) var(--spacing-3);
+  background: var(--console-rail);
+  color: var(--color-on-dark);
+}
+
+.console-brand {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-3);
+  padding-inline: var(--spacing-2);
+}
+
+.console-brand b {
+  display: grid;
+  place-items: center;
+  inline-size: 2.1rem;
+  block-size: 2.1rem;
+  flex-shrink: 0;
+  border-radius: var(--radius-element);
+  background: var(--console-blue);
+  color: var(--color-on-dark);
+  font-size: 1.15rem;
+}
+
+.console-brand h1 {
+  color: inherit;
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.console-navigation {
+  display: grid;
+  gap: var(--spacing-1);
+}
+
+.console-navigation .astryx-button {
+  inline-size: 100%;
+  justify-content: flex-start;
+  padding: var(--spacing-3);
+  color: inherit;
+  border-radius: var(--radius-element);
+}
+
+.console-navigation .astryx-button:hover,
+.console-navigation .astryx-button:focus-visible {
+  background: color-mix(in srgb, var(--color-on-dark) 12%, transparent);
+}
+
+.console-navigation .astryx-button[aria-current='page'] {
+  background: var(--console-blue);
+  color: var(--color-on-dark);
+  font-weight: 600;
+}
+
+.console-main, .console-content, .console-detail {
+  min-inline-size: 0;
+}
+
+.console-topbar {
+  min-block-size: 3.75rem;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--spacing-3);
+  padding: var(--spacing-2) var(--spacing-6);
+  background: var(--console-panel);
+  border-block-end: thin solid var(--console-border);
+}
+
+.console-topbar label {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--spacing-2);
+  color: var(--console-secondary);
+  font-weight: 600;
+}
+
+.console-body {
+  max-inline-size: 105rem;
+  margin-inline: auto;
+  padding: var(--spacing-6);
+}
+
+.console-page-heading, .console-panel-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--spacing-3);
+}
+
+.console-page-heading {
+  margin-block-end: var(--spacing-5);
+}
+
+.console-page-heading h2 {
+  font-size: clamp(1.35rem, 2.4vw, 1.9rem);
+  font-weight: 700;
+}
+
+.console-panel-heading {
+  padding: var(--spacing-4) var(--spacing-5);
+}
+
+.console-columns {
+  display: grid;
+  gap: var(--spacing-5);
+  align-items: start;
+}
+
+.console-columns.with-detail {
+  grid-template-columns: minmax(0, 1.15fr) minmax(20rem, 1fr);
+}
+
+.console-panel {
+  min-inline-size: 0;
+  background: var(--console-panel);
+  border: thin solid var(--console-border);
+  border-radius: var(--radius-container);
+}
+
+.console-section {
+  padding: var(--spacing-5);
+}
+
+.console-empty {
+  color: var(--console-secondary);
+  padding: var(--spacing-5);
+}
+
+.console-table {
+  inline-size: 100%;
+  border-collapse: collapse;
+  text-align: start;
+  font-size: .875rem;
+}
+
+.console-table th,
+.console-table td {
+  padding: var(--spacing-3) var(--spacing-5);
+  border-block-start: thin solid var(--console-border);
+  text-align: start;
+  overflow-wrap: anywhere;
+}
+
+.console-table th {
+  background: var(--console-canvas);
+  color: var(--console-secondary);
+  font-weight: 600;
+}
+
+.console-table td:first-child {
+  font-weight: 600;
+}
+
+.console-table td:first-child .astryx-button {
+  margin-inline-start: calc(-1 * var(--spacing-2));
+  padding-inline: var(--spacing-2);
+  text-align: start;
+}
+
+.console-table tr[data-selected='true'] {
+  background: var(--color-background-blue);
+}
+
+.console-table a, .console-detail a {
+  color: var(--console-blue);
+  text-decoration: underline;
+  text-underline-offset: .15em;
+}
+
+.console-shell :is(a, summary, input, select, textarea, button):focus-visible {
+  outline: thin solid var(--console-blue);
+  outline-offset: var(--spacing-0-5);
+}
+
+.console-shell form {
+  max-inline-size: 42rem;
+}
+
+.console-shell form label {
+  display: grid;
+  gap: var(--spacing-1);
+  min-inline-size: 0;
+  font-weight: 500;
+}
+
+.console-shell :is(input:not([type='checkbox'], [type='hidden']), select, textarea) {
+  inline-size: 100%;
+  min-block-size: 2.35rem;
+  min-inline-size: 0;
+  padding: var(--spacing-2) var(--spacing-3);
+  background: var(--console-panel);
+  color: var(--console-ink);
+  border: thin solid var(--color-border-emphasized);
+  border-radius: var(--radius-element);
+  font: inherit;
+}
+
+.console-shell select {
+  appearance: auto;
+}
+
+.console-shell .console-topbar select {
+  inline-size: auto;
+  max-inline-size: 100%;
+  min-block-size: 2.1rem;
+}
+
+.console-shell textarea {
+  min-block-size: 4.5rem;
+  resize: vertical;
+}
+
+.console-shell fieldset {
+  padding: var(--spacing-2) var(--spacing-3);
+  border: thin solid var(--console-border);
+  border-radius: var(--radius-element);
+}
+
+.console-shell label:has(input[type='checkbox']) {
+  display: flex;
+  align-items: start;
+  gap: var(--spacing-2);
+  overflow-wrap: anywhere;
+}
+
+.console-shell input[type='checkbox'] {
+  margin-block-start: .2em;
+  accent-color: var(--console-blue);
+  flex-shrink: 0;
+}
+
+.console-status {
+  display: inline-block;
+  align-self: flex-start;
+  width: max-content;
+  max-width: 100%;
+  padding: var(--spacing-0-5) var(--spacing-2);
+  border-radius: var(--radius-full);
+  background: var(--color-background-gray);
+  color: var(--console-secondary);
+  font-size: .8125rem;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.console-status[data-tone='active'] {background: var(--color-background-blue); color: var(--color-text-blue);}
+.console-status[data-tone='review'] {background: var(--color-background-yellow); color: var(--color-text-yellow);}
+.console-status[data-tone='success'] {background: var(--color-background-green); color: var(--color-text-green);}
+.console-status[data-tone='error'] {background: var(--color-background-red); color: var(--color-text-red);}
+
+.console-timeline,
+.console-repo-results {
+  display: grid;
+  gap: var(--spacing-2);
+  list-style: none;
+}
+.console-timeline > li,
+.console-repo-results > li {
+  border: thin solid var(--console-border);
+  border-radius: var(--radius-element);
+  padding: var(--spacing-3);
+  overflow-wrap: anywhere;
+}
+.console-shell details summary {
+  padding-block: var(--spacing-1);
+  cursor: pointer;
+  color: var(--console-blue);
+  overflow-wrap: anywhere;
+}
+.console-output {
+  padding: var(--spacing-3);
+  background: var(--console-canvas);
+  border-radius: var(--radius-element);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: .8rem;
+}
+.console-error {
+  border: thin solid var(--color-border-error);
+  background: var(--color-background-red);
+  color: var(--color-text-error);
+  border-radius: var(--radius-element);
+  padding: var(--spacing-3);
+  margin-block-end: var(--spacing-4);
+}
+
+.console-sop-row {
+  border-block-start: thin solid var(--console-border);
+  padding-block: var(--spacing-3);
+}
+
+@media (max-width: 68rem) {
+  .console-columns.with-detail {grid-template-columns: minmax(0,1fr);}
+}
+
+@media (max-width: 48rem) {
+  .console-shell {grid-template-columns: minmax(0, 1fr);}
+  .console-sidebar {position: static; min-block-size: auto; gap: var(--spacing-3);}
+  .console-navigation {grid-template-columns: repeat(2, minmax(0, 1fr));}
+  .console-topbar, .console-body {padding: var(--spacing-3);}
+  .console-section, .console-panel-heading {padding: var(--spacing-3);}
+  .console-table thead {
+    position: absolute;
+    clip-path: inset(50%);
+    inline-size: .0625rem;
+    block-size: .0625rem;
+    overflow: hidden;
+  }
+  .console-table, .console-table tbody {display: block;}
+  .console-table tr {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: baseline;
+    border-block-start: thin solid var(--console-border);
+    padding: var(--spacing-3);
+    gap: var(--spacing-1) var(--spacing-2);
+  }
+  .console-table td {display: block; padding: 0; border: 0;}
+  .console-table td:first-child {grid-column: 1 / -1;}
+  .console-table td[data-label]::before {
+    content: attr(data-label) ' ';
+    color: var(--console-secondary);
+    font-size: .75rem;
+  }
+}
+
+.console-shell .astryx-button[data-variant='primary'] {
+  background: var(--console-blue);
+  color: var(--color-on-dark);
+}
+.console-shell .astryx-button[data-variant='primary']:hover:not([aria-disabled='true']) {
+  background: color-mix(in srgb, var(--console-blue) 85%, var(--console-rail));
+}
+.console-sop-editor label {
+  display: grid;
+  gap: var(--spacing-1);
+  min-inline-size: 0;
+}
+
+.console-commits {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--spacing-1) var(--spacing-3);
+  padding: var(--spacing-3);
+  border: thin solid var(--console-border);
+  border-radius: var(--radius-element);
+  font-size: .8125rem;
+}
+.console-commits dt {
+  overflow-wrap: anywhere;
+}
+
+.console-settings-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-1);
+  padding: var(--spacing-1);
+  background: var(--console-panel);
+  border: thin solid var(--console-border);
+  border-radius: var(--radius-element);
+}
+
+.console-settings-tabs button {
+  min-block-size: 2.5rem;
+  padding-inline: var(--spacing-4);
+  border-radius: var(--radius-element);
+  color: var(--console-secondary);
+}
+
+.console-settings-tabs button[aria-selected='true'] {
+  background: var(--console-blue);
+  color: var(--color-on-dark);
+  font-weight: 600;
+}
+
+.console-settings-search {
+  display: grid;
+  gap: var(--spacing-1);
+  inline-size: min(24rem, 100%);
+}
+
+.sop-editor-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(16rem, .48fr);
+  gap: var(--spacing-3);
+  align-items: start;
+}
+.sop-canvas-frame, .sop-node-inspector {
+  min-inline-size: 0;
+  border: thin solid var(--console-border);
+  border-radius: var(--radius-element);
+}
+.sop-canvas-frame {
+  position: relative;
+  block-size: min(62vh, 40rem);
+  min-block-size: 23rem;
+  overflow: hidden;
+  background: var(--console-canvas);
+}
+.sop-canvas-frame .react-flow {
+  --xy-edge-stroke-default: var(--console-blue);
+  --xy-edge-stroke-selected-default: var(--color-text-purple);
+  --xy-edge-stroke-width-default: 2;
+  --xy-background-pattern-dots-color-default: var(--color-border-emphasized);
+}
+.sop-node-inspector {
+  padding: var(--spacing-3);
+}
+.sop-node-inspector fieldset {
+  display: grid;
+  gap: var(--spacing-1);
+}
+.sop-canvas-node {
+  inline-size: 11.9rem;
+  min-block-size: 4.65rem;
+  display: grid;
+  align-content: center;
+  gap: var(--spacing-1);
+  padding: var(--spacing-3);
+  border: thin solid var(--color-border-blue);
+  border-radius: var(--radius-element);
+  background: var(--console-panel);
+}
+.sop-canvas-node strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sop-canvas-node small {
+  color: var(--color-text-blue);
+}
+.sop-canvas-node[data-type='review'] {
+  border-color: var(--color-border-warning);
+}
+.sop-canvas-node[data-type='review'] small {
+  color: var(--color-text-warning);
+}
+.sop-canvas-node[data-selected='true'] {
+  outline: .15rem solid var(--console-blue);
+}
+.sop-canvas-node .react-flow__handle {
+  inline-size: .8rem;
+  block-size: .8rem;
+  background: var(--console-panel);
+  border: .12rem solid var(--console-blue);
+}
+.sop-canvas-help {
+  color: var(--console-secondary);
+  font-size: .875rem;
+}
+.sop-canvas-empty {
+  position: absolute;
+  inset-block-start: 42%;
+  inset-inline: var(--spacing-5);
+  pointer-events: none;
+  text-align: center;
+  color: var(--console-secondary);
+}
+@media (max-width: 64rem) {
+  .sop-editor-columns {grid-template-columns: minmax(0, 1fr);}
+  .sop-canvas-frame {block-size: 24rem; min-block-size: 19rem;}
+}

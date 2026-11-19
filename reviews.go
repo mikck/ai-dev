@@ -69,7 +69,7 @@ func createVersion(tx *gorm.DB, draft input) (int, error) {
 func (s *store) publishSOP(data input) (int, error) {
 	var version int
 	err := s.db.Transaction(func(tx *gorm.DB) error {
-		draft, err := one(tx, "SELECT * FROM sops WHERE id=? AND workspace=?", str(data, "identifier"), str(data, "workspace"))
+		draft, err := one(tx, "SELECT * FROM sops WHERE id=? AND workspace=? AND id NOT IN (SELECT id FROM archived_sops)", str(data, "identifier"), str(data, "workspace"))
 		if err != nil {
 			return err
 		}

@@ -220,7 +220,7 @@ func updateReviews(tx *gorm.DB, id string, artifact input) (string, error) {
 	if len(reviews) == 0 {
 		return "", nil
 	}
-	repositories, err := rows(tx, `SELECT repositories.* FROM targets JOIN repositories ON repositories.id=targets.repository WHERE requirement=?`, id)
+	repositories, err := taskRepositories(tx, id)
 	if err != nil {
 		return "", err
 	}

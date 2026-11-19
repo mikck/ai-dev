@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -129,6 +130,10 @@ func openStore(root string) (*store, error) {
 		sqlDB.Close()
 		return nil, err
 	}
+	if err := migrateWorkspaceSettings(db); err != nil {
+		sqlDB.Close()
+		return nil, err
+	}
 	return &store{db}, nil
 }
 
@@ -191,9 +196,8 @@ func (s *store) repository(data input) (string, error) {
 	if !validBranch(base) {
 		return "", errors.New("目标分支无效")
 	}
-	id := token(16)
-	return id, s.db.Table("repositories").Create(input{"id": id, "workspace": str(data, "workspace"),
-		"provider": provider, "url": strings.TrimSuffix(raw, ".git") + ".git", "base": base, "verify": str(data, "verify")}).Error
+	return s.saveRepository(str(data, "identifier"), str(data, "workspace"), input{
+		"provider": provider, "url": strings.TrimSuffix(raw, ".git") + ".git", "base": base, "verify": str(data, "verify")})
 }
 
 func readResources(db *gorm.DB, workspace string) ([]input, error) {
@@ -280,7 +284,7 @@ func (s *store) deleteResource(data input) error {
 				}
 			}
 		}
-		sops, err := rows(tx, "SELECT nodes FROM sops WHERE workspace = ?", workspace)
+		sops, err := rows(tx, "SELECT nodes FROM sops WHERE workspace = ? AND id NOT IN (SELECT id FROM archived_sops)", workspace)
 		if err != nil {
 			return err
 		}
@@ -314,6 +318,15 @@ func validateNodes(db *gorm.DB, workspace string, value any) ([]input, error) {
 			return nil, errors.New("节点编号、名称、类型或依赖无效")
 		}
 		normalized := input{"id": id, "name": name, "type": kind, "depends": deps, "prompt": str(node, "prompt")}
+		if raw, exists := node["position"]; exists {
+			position := obj(raw)
+			x, xOK := position["x"].(float64)
+			y, yOK := position["y"].(float64)
+			if !xOK || !yOK || math.IsNaN(x) || math.IsNaN(y) || math.Abs(x) > 100000 || math.Abs(y) > 100000 {
+				return nil, errors.New("画布节点位置无效")
+			}
+			normalized["position"] = input{"x": x, "y": y}
+		}
 		if kind == "agent" {
 			agent := str(node, "agent")
 			if str(resources[agent], "kind") != "agent" {
@@ -363,17 +376,13 @@ func (s *store) saveSOP(data input) (string, error) {
 		}
 		values := input{"name": name, "nodes": toJSON(nodes)}
 		if id != "" {
-			return changed(tx.Table("sops").Where("id = ? AND workspace = ?", id, workspace).Updates(values), "SOP 不存在")
+			return changed(tx.Table("sops").Where("id = ? AND workspace = ? AND id NOT IN (SELECT id FROM archived_sops)", id, workspace).Updates(values), "SOP 不存在")
 		}
 		id = token(16)
 		values["id"], values["workspace"] = id, workspace
 		return tx.Table("sops").Create(values).Error
 	})
 	return id, err
-}
-
-func (s *store) deleteSOP(data input) error {
-	return changed(s.db.Exec("DELETE FROM sops WHERE workspace = ? AND id = ? AND NOT EXISTS (SELECT 1 FROM sop_versions WHERE sop = sops.id)", str(data, "workspace"), str(data, "identifier")), "仅可删除尚未发布的 SOP")
 }
 
 func (s *store) setup(workspace string) (input, error) {
@@ -383,7 +392,7 @@ func (s *store) setup(workspace string) (input, error) {
 	}
 	sops, err := rows(s.db, `SELECT sops.*, (SELECT MAX(version) FROM sop_versions WHERE sop=sops.id) AS published_version,
         (SELECT json_extract(snapshot,'$.name') FROM sop_versions WHERE sop=sops.id ORDER BY version DESC LIMIT 1) AS published_name
-        FROM sops WHERE workspace = ? ORDER BY name`, workspace)
+        FROM sops WHERE workspace = ? AND id NOT IN (SELECT id FROM archived_sops) ORDER BY name`, workspace)
 	for _, sop := range sops {
 		sop["nodes"] = fromJSON(sop["nodes"])
 		versions, versionErr := rows(s.db, `SELECT version, published, json_extract(snapshot,'$.name') AS name
@@ -415,7 +424,7 @@ func (s *store) requirement(data input) (string, error) {
 		if sop != "" {
 			status = "sop_queued"
 			version, err := one(tx, `SELECT snapshot FROM sop_versions JOIN sops ON sops.id=sop_versions.sop
-                WHERE sop=? AND sops.workspace=? ORDER BY version DESC LIMIT 1`, sop, workspace)
+                WHERE sop=? AND sops.workspace=? AND sops.id NOT IN (SELECT id FROM archived_sops) ORDER BY version DESC LIMIT 1`, sop, workspace)
 			if err != nil {
 				return err
 			}
@@ -434,8 +443,12 @@ func (s *store) requirement(data input) (string, error) {
 				continue
 			}
 			seen[repo] = true
-			result := tx.Exec("INSERT INTO targets(requirement,repository) SELECT ?,id FROM repositories WHERE id = ? AND workspace = ?", id, repo, workspace)
+			result := tx.Exec("INSERT INTO targets(requirement,repository) SELECT ?,id FROM repositories WHERE id = ? AND workspace = ? AND id NOT IN (SELECT id FROM archived_repositories)", id, repo, workspace)
 			if err := changed(result, "需求只能关联所属 workspace 的仓库"); err != nil {
+				return err
+			}
+			if err := tx.Exec(`INSERT INTO target_settings(requirement,repository,provider,url,base,verify)
+                SELECT ?,id,provider,url,base,verify FROM repositories WHERE id=?`, id, repo).Error; err != nil {
 				return err
 			}
 		}
@@ -463,8 +476,7 @@ func itemAt(db *gorm.DB, id string, includeHistory bool) (input, error) {
 	if item == nil {
 		return nil, errors.New("需求不存在")
 	}
-	targets, err := rows(db, `SELECT repositories.*, targets.review FROM targets JOIN repositories
-		ON repositories.id = targets.repository WHERE targets.requirement = ? ORDER BY targets.rowid`, id)
+	targets, err := taskRepositories(db, id)
 	if err != nil {
 		return nil, err
 	}
@@ -528,6 +540,9 @@ func (s *store) overview() (input, error) {
 	out := input{}
 	for _, table := range []string{"workspaces", "repositories", "requirements"} {
 		query := "SELECT * FROM " + table + " ORDER BY rowid DESC"
+		if table == "repositories" {
+			query = "SELECT * FROM repositories WHERE id NOT IN (SELECT id FROM archived_repositories) ORDER BY rowid DESC"
+		}
 		if table == "requirements" {
 			query = `SELECT requirements.*, json_extract(runs.snapshot,'$.name') AS sop
 				FROM requirements LEFT JOIN runs ON runs.requirement = requirements.id ORDER BY requirements.rowid DESC`

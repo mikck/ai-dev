@@ -94,7 +94,7 @@ func router(s *store, secret string) http.Handler {
 		return input{"version": version}, err
 	})
 	for name, action := range map[string]func(input) error{
-		"resources/delete": s.deleteResource, "sops/delete": s.deleteSOP,
+		"resources/delete": s.deleteResource, "sops/delete": s.deleteSOP, "repositories/delete": s.deleteRepository,
 		"executors/recover": func(data input) error { return s.recoverExecutor(str(data, "identifier")) },
 		"executors/manage": func(data input) error {
 			enabled, ok := data["enabled"].(bool)
