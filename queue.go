@@ -3,7 +3,6 @@ package main
 import (
 	"crypto/subtle"
 	"errors"
-	"fmt"
 	"time"
 
 	"gorm.io/gorm"
@@ -38,18 +37,24 @@ func (s *store) heartbeat(id string) error {
 	return s.db.Exec("UPDATE executors SET seen = ? WHERE id = ?", now(), id).Error
 }
 
-func (s *store) executors() ([]input, error) {
-	entries, err := rows(s.db, `SELECT id,name,seen,enabled,
+type executorStatus struct {
+	ID      string  `json:"id"`
+	Name    string  `json:"name"`
+	Seen    float64 `json:"seen"`
+	Enabled bool    `json:"enabled"`
+	Online  bool    `json:"online"`
+	Running int     `json:"running"`
+}
+
+func (s *store) executors() ([]executorStatus, error) {
+	entries := []executorStatus{}
+	err := s.db.Raw(`SELECT id,name,seen,enabled,
 		seen >= ? AS online,
 		(SELECT count(*) FROM steps JOIN runs USING(requirement) WHERE runs.executor = executors.id AND steps.status='running') +
 		(SELECT count(*) FROM drafts WHERE executor=executors.id AND status='running') +
 		(SELECT count(*) FROM legacy_jobs JOIN requirements ON requirements.id=legacy_jobs.requirement
 			WHERE executor=executors.id AND requirements.status IN ('planning','executing')) AS running
-		FROM executors ORDER BY name`, now()-45)
-	for _, entry := range entries {
-		entry["online"] = fmt.Sprint(entry["online"]) == "1"
-		entry["enabled"] = fmt.Sprint(entry["enabled"]) == "1"
-	}
+		FROM executors ORDER BY name`, now()-45).Scan(&entries).Error
 	return entries, err
 }
 

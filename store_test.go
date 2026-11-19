@@ -104,3 +104,30 @@ func TestExistingDatabaseAndWorkspaceIsolation(t *testing.T) {
 		t.Fatalf("workspace data not restored: %v", setup)
 	}
 }
+
+func TestExecutorOnlineStatus(t *testing.T) {
+	s, err := openStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.register("worker", "Worker", "proof"); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := s.executors()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || !entries[0].Online || !entries[0].Enabled || entries[0].Running != 0 {
+		t.Fatalf("recent executor must be online and idle, got %+v", entries)
+	}
+	if err := s.db.Exec("UPDATE executors SET seen = ? WHERE id = ?", now()-60, "worker").Error; err != nil {
+		t.Fatal(err)
+	}
+	entries, err = s.executors()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Online {
+		t.Fatalf("executor with stale heartbeat must be offline, got %+v", entries)
+	}
+}
