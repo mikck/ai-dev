@@ -1,62 +1,49 @@
 # 需求 AI 自动化交付平台
 
-一个 workspace 对应一个目标系统，可以登记多个 GitHub 或 GitLab 仓库。需求归属 workspace，并选择本次交付涉及的仓库。每条需求使用独立的检出目录和分支。
+一个 workspace 对应一个目标系统，可登记多个 GitHub 或 GitLab 仓库。需求选择 SOP 和仓库。Agent 节点与人工审核节点共同推进交付。
 
-Web 控制台和 JSON API 由同一个 Python 服务提供。后台执行器使用同一个 SQLite 数据库领取任务，可启动多个执行器处理不同需求。
+管理面使用 Go、Gin、GORM 和 SQLite。React 控制台使用 Meta Astryx 和 Neutral 主题，构建后嵌入同一个 `ai-dev` 二进制。该二进制通过子命令分别启动管理面和执行器。
 
-## 启动
+## 构建与启动
 
-需要 Node.js 22.13+、npm、Python 3.12+ 和 Git。在仓库根目录运行：
+Linux 构建需要 Go 1.24+、带静态链接工具链的 C 编译器、Node.js 22.13+、npm 和 Git。
 
 ```sh
 npm ci
 npm run build
 npm test
-npm start
 ```
 
-控制台默认监听 `127.0.0.1:8000`。新 SOP 需求使用下文的独立执行器。旧版未绑定 SOP 的任务仍可通过 `npm run worker` 处理。管理面默认使用 `.delivery/`，独立执行器默认使用 `.executor/`。
-
-这是面向可信操作者的本地初始化版本。Web 服务没有用户认证和租户授权。请在专用执行器账户中运行，仓库、需求与验证命令均应来自可信来源。workspace 是管理边界，AI 进程没有独立的租户安全边界。
-
-## 执行与发布
-
-1. 为所用执行器安装并认证 `codex` 或 `claude`。为目标平台安装并认证 `gh` 或 `glab`。执行器账户还需要能通过 HTTPS 拉取和推送目标仓库，以及创建草稿 PR 或 MR。Git 提交需要配置作者身份。使用本机凭据存储和限于目标仓库的权限。
-2. 在控制台创建 workspace，登记仓库 HTTPS 地址、目标分支和可选的仓库验证命令。当前支持 `github.com` 和 `gitlab.com`。
-3. 提交需求时选择 Claude Code CLI 或 Codex CLI，并选择同一 workspace 的仓库。执行器检出仓库并用所选 CLI 生成计划。
-4. 批准计划后，CLI 在需求分支修改代码，运行检查并提交，再调用任务提供的发布命令。发布命令校验任务分支和工作区状态，运行已登记的仓库验证命令，推送分支并创建草稿 PR 或 MR。
-5. 各仓库的 PR 或 MR 含同一个交付编号。部分失败时可重试，已记录的评审链接会被复用。PR 或 MR 由仓库维护者审核合并。
-
-当前日志展示每个阶段结束时的输出。执行器异常退出时，正在执行的任务可能需要管理员检查远端结果后恢复对应队列状态。
-
-## 检查
-
-`npm test` 使用本地 Git 仓库与替身 CLI，覆盖 workspace 归属、审核、两种执行器、跨平台发布及失败重试。真实的模型调用和 PR/MR 创建需要配置有权限的目标仓库与相应凭据。
-
-## Workspace 资源、SOP 与执行器
-
-在 **Workspace 配置** 中维护 Agent、Skill、MCP 和 SOP。
-
-- **Agent** 选择 Codex CLI 或 Claude Code CLI，可引用当前 workspace 的 Skill 和 MCP。Skill 文本会附到节点指令中。MCP 使用 stdio 命令与参数，由所选 CLI 加载。对于受信的本地运行，MCP 在执行器账户下启动。
-- **SOP** 使用节点依赖图。拖动节点调整优先级，也可拖到另一节点的前置节点区域来增加依赖。可通过 AI 对话生成或迭代草稿，检查后保存。循环和跨 workspace 引用会被拒绝。
-- **需求** 选择 SOP 和仓库时会保留配置快照。人工节点记录决定和意见。Agent 节点会记录执行输出、仓库提交和 PR／MR 链接，后续节点可读取已完成节点的产物。开启发布的节点由 Agent 调用发布命令。
-- **Git worktree**：执行器只准备需求专用的 Git 元数据。Agent 调用 `git worktree add` 创建工作目录。同一需求所有仓库都使用 `delivery/<需求 ID>`，各节点继续在这些 worktree 上执行。
-
-### 分开运行管理面和执行器
-
-为双方设置同一个高熵 `DELIVERY_EXECUTOR_TOKEN`，通过各自进程的环境注入。管理面启动：
+把 `bin/ai-dev` 分发到管理面和执行器主机。运行管理面和执行器不需要安装 Python、Node.js 或 npm。为双方的进程注入同一个高熵 `DELIVERY_EXECUTOR_TOKEN`。
 
 ```sh
-npm run build
-npm start
+# 管理面与内嵌控制台
+./bin/ai-dev serve --host 127.0.0.1 --port 8000 --root .delivery
+
+# 独立进程，或另一台主机
+./bin/ai-dev executor --url http://127.0.0.1:8000 --id local --name "Local executor" --root .executor
 ```
 
-独立主机或进程上的执行器：
+管理面使用 `.delivery/delivery.db`。升级时先停止旧进程并备份数据库，再用相同的 `--root` 启动 Go 服务。执行器使用 `.executor/` 保存身份、待回报结果及 Git worktree。要继续既有任务，请保留原执行器 ID 和执行目录。
 
-```sh
-npm run executor -- --url http://127.0.0.1:8000 --id local --name "Local executor"
-```
+当前控制台面向可信操作者。跨主机连接使用 HTTPS，并通过反向代理或私网保护管理界面和 API。workspace 是管理边界。
 
-跨主机连接使用 HTTPS，并在反向代理或私网保护管理界面和 API。执行器仅持有本地文件和身份凭据，通过 HTTP 注册、心跳、领取和回报，无需访问管理面的数据库。云环境发布前应单独配置执行器令牌及 CLI 凭据。
+## Workspace 与执行
 
-控制台的 **执行器** 页可查看在线状态、停用或启用。为保留 worktree，一个需求一旦领取便绑定该执行器。停用会阻止领取新节点，已经领取的节点仍可回报。失联时先确认原进程已停止，再停用并恢复任务；修复并启动同一个执行器后才可继续重试。保留执行器数据目录及其身份文件。
+- 在 **Workspace 配置** 管理 Agent、Skill、MCP 和 SOP。Agent 可以选 Codex CLI 或 Claude Code CLI，引用本 workspace 的 Skill 文本和 stdio MCP 服务器。
+- SOP 支持拖拽排序与设置依赖、AI 多轮对话生成草稿、Agent 和人工审核节点。保存时校验依赖与 workspace 归属。创建需求时保存 SOP 与资源配置快照。
+- Agent 调用 `git worktree add` 创建工作目录。同一需求的所有仓库共用 `delivery/<需求 ID>` 这个分支名，各节点复用已有 worktree。节点存档输出、提交、PR／MR 链接或人工审核意见。
+- 启用发布的节点由 Agent 调用二进制提供的发布命令。发布前运行仓库验证命令，随后推送分支、创建草稿 PR 或 MR。发布重试复用已经记录的评审链接。
+- 执行器经 HTTP 注册、上报心跳并领取任务。停用后停止领取新节点，运行中的节点仍可回报。任务绑定保存其 worktree 的执行器。失联时先确认原进程已停止，再停用并恢复任务，保留原 ID 和执行目录以便重试。
+
+真实执行需要在执行器主机安装 Git 和所选 AI CLI。发布时需要已认证的 `gh` 或 `glab`、Git 作者身份，以及目标仓库的读写和创建审核请求权限。当前支持 `github.com` 和 `gitlab.com` 的 HTTPS 仓库。
+
+`npm test` 会构建单二进制并运行 Go 测试，覆盖 SQLite 业务状态、执行器鉴权、内嵌静态资源、真实 Git worktree、审核和跨平台发布链路。模型与托管平台调用由测试替身提供。
+
+## SOP 发布与审核返工
+
+在 Workspace 配置保存 SOP 草稿后，发布版本才能供新需求选择。每次发布会冻结节点、Agent、Skill 和 MCP 配置。修改草稿或发布新版本时，现有需求继续运行创建时的快照。升级已有数据库会为旧 SOP 回填首个已发布版本。
+
+「待审核」汇集当前 workspace 的人工审核节点。审核人可以通过、驳回并终止，或填写意见后退回已完成的上游 Agent。返工沿用原执行器和 worktree，重跑该节点及其后继，保留之前的提交、审核意见和执行产物。
+
+Agent 节点可以声明相对于仓库根目录的 UTF-8 文本产物，每项路径至少在一个目标仓库中存在。平台保存每次执行的输出、提交、评审链接和产物文本，供审核详情回看。单个文件上限 16 KiB，每次节点执行最多保存 24 个文件，编码后的文本总上限为 96 KiB。

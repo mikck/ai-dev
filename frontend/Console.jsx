@@ -29,6 +29,46 @@ async function request(path, payload) {
   return result;
 }
 
+function Artifact({artifact}) {
+  const {files = [], ...metadata} = artifact;
+  return <>
+    {files.map(file => <details key={file.repository + '/' + file.path}>
+      <summary>{file.path} · {file.repository}</summary>
+      <pre style={{whiteSpace: 'pre-wrap', overflowWrap: 'anywhere'}}>{file.content}</pre>
+    </details>)}
+    {Object.keys(metadata).length > 0 && <pre style={{whiteSpace: 'pre-wrap', overflowWrap: 'anywhere'}}>
+      {JSON.stringify(metadata, null, 2)}
+    </pre>}
+  </>;
+}
+
+function ReviewForm({detail, pending, onReview}) {
+  return <form onSubmit={event => {
+    event.preventDefault();
+    const fields = new FormData(event.currentTarget, event.nativeEvent.submitter);
+    const data = Object.fromEntries(fields);
+    if (data.decision === 'returned' && (!data.target || !data.note.trim())) {
+      onReview(null);
+      return;
+    }
+    onReview({...data, node: detail.review_node});
+  }}>
+    <VStack gap={2}>
+      <label>审核意见 <textarea name="note" /></label>
+      {detail.return_options?.length > 0 && <label>返工节点 <select name="target">
+        <option value="">选择上游 Agent</option>
+        {detail.return_options.map(node => <option key={node.id} value={node.id}>{node.name}</option>)}
+      </select></label>}
+      <HStack gap={2} wrap="wrap">
+        <Button label="通过" name="decision" value="approved" type="submit" variant="primary" isDisabled={pending} />
+        {detail.return_options?.length > 0 && <Button label="退回返工" name="decision" value="returned"
+          type="submit" isDisabled={pending} />}
+        <Button label="驳回并终止" name="decision" value="rejected" type="submit" isDisabled={pending} />
+      </HStack>
+    </VStack>
+  </form>;
+}
+
 function Console() {
   const [data, setData] = useState({workspaces: [], repositories: [], requirements: []});
   const [selected, setSelected] = useState('');
@@ -39,11 +79,14 @@ function Console() {
   const [tab, setTab] = useState('requirements');
   const [workspaceData, setWorkspaceData] = useState(null);
   const [executors, setExecutors] = useState([]);
+  const [reviewData, setReviewData] = useState(null);
   const workspace = selected || data.workspaces[0]?.id;
+  const inbox = reviewData?.workspace === workspace ? reviewData?.inbox ?? [] : [];
   const repositories = data.repositories.filter(repo => repo.workspace === workspace);
   const requirements = data.requirements.filter(item => item.workspace === workspace);
   const setup = workspaceData?.workspace === workspace && workspaceData
     ? workspaceData : {resources: [], sops: []};
+  const publishedSOPs = setup.sops.filter(sop => sop.published_version);
   const refreshSetup = useCallback(async (signal) => {
     if (!workspace) return;
     const result = await request('/api/workspaces/' + workspace + '/setup');
@@ -64,10 +107,12 @@ function Console() {
         const list = await request('/api');
         const item = opened ? await request('/api/requirements/' + opened) : null;
         const workers = tab === 'executors' ? await request('/api/executors') : [];
+        const reviews = tab === 'reviews' && workspace ? await request('/api/workspaces/' + workspace + '/reviews') : [];
         if (active) {
           setData(list);
           setDetail(item);
           setExecutors(workers);
+          setReviewData({workspace, inbox: reviews});
         }
       } catch (err) {
         if (active) setError(err.message);
@@ -79,7 +124,7 @@ function Console() {
       active = false;
       clearInterval(timer);
     };
-  }, [opened, tab]);
+  }, [opened, tab, workspace]);
 
   async function mutate(path, payload, form) {
     setError('');
@@ -88,6 +133,8 @@ function Console() {
       const result = await request(path, payload);
       setData(await request('/api'));
       if (tab === 'executors') setExecutors(await request('/api/executors'));
+      if (tab === 'reviews' && workspace) setReviewData({workspace,
+        inbox: await request('/api/workspaces/' + workspace + '/reviews')});
       form?.reset();
       if (path === '/api/workspaces') {
         setSelected(result.id);
@@ -130,7 +177,7 @@ function Console() {
           </label>}
         </HStack>
       </LayoutHeader>
-    } end={tab === 'requirements' && detail && detail.id === opened && (
+    } end={(tab === 'requirements' || tab === 'reviews') && detail && detail.id === opened && (
       <LayoutPanel padding={4} label="需求详情" role="complementary">
         <VStack gap={3}>
           <HStack gap={2} vAlign="center" wrap="wrap">
@@ -140,28 +187,28 @@ function Console() {
           <Text>{states[detail.status]}</Text>
           <Text>{detail.description}</Text>
           {detail.sop && <VStack gap={2}>
-            <Heading level={3}>{detail.sop}</Heading>
+            <Heading level={3}>{detail.sop}{detail.sop_version ? ` · v${detail.sop_version}` : ''}</Heading>
             <ol>{detail.nodes.map(node => <li key={node.id}>
               <Text>{node.name} · {{pending: '等待依赖', ready: '已排队', running: '执行中', review: '待审核',
                 done: '已完成', rejected: '已驳回', failed: '失败'}[node.status]}</Text>
               {node.prompt && <Text>{node.prompt}</Text>}
-              {node.artifact && <details><summary>查看节点产物</summary>
-                <pre style={{whiteSpace: 'pre-wrap', overflowWrap: 'anywhere'}}>{JSON.stringify(node.artifact, null, 2)}</pre>
+              {node.attempts?.length > 0 && <details><summary>执行记录（{node.attempts.length}）</summary>
+                <ol reversed>{node.attempts.map((attempt, index) => <li key={attempt.id}>
+                  <details><summary>第 {node.attempts.length - index} 次 · {{
+                    done: '完成', failed: '失败', returned: '退回', rejected: '终止',
+                  }[attempt.status] || attempt.status}</summary>
+                    <Artifact artifact={attempt.artifact || {}} />
+                  </details>
+                </li>)}</ol>
+              </details>}
+              {!node.attempts?.length && node.artifact && <details><summary>查看节点产物</summary>
+                <Artifact artifact={node.artifact} />
               </details>}
             </li>)}</ol>
-            {detail.status === 'sop_review' && <form onSubmit={event => {
-              event.preventDefault();
-              const fields = new FormData(event.currentTarget, event.nativeEvent.submitter);
-              mutate('/api/requirements/' + detail.id + '/review', Object.fromEntries(fields));
-            }}>
-              <VStack gap={2}>
-                <label>审核意见 <textarea name="note" /></label>
-                <HStack gap={2}>
-                  <Button label="通过" name="decision" value="approved" type="submit" variant="primary" isDisabled={pending} />
-                  <Button label="驳回" name="decision" value="rejected" type="submit" isDisabled={pending} />
-                </HStack>
-              </VStack>
-            </form>}
+            {detail.status === 'sop_review' && <ReviewForm key={detail.id + '/' + detail.review_node} detail={detail} pending={pending}
+              onReview={payload => payload
+                ? mutate('/api/requirements/' + detail.id + '/review', payload)
+                : setError('请选择返工节点并填写审核意见')} />}
           </VStack>}
           {detail.plan && <section><Heading level={3}>AI 计划</Heading>
             <pre style={{whiteSpace: 'pre-wrap', overflowWrap: 'anywhere'}}>{detail.plan}</pre>
@@ -188,11 +235,25 @@ function Console() {
         <VStack gap={4}>
           <HStack gap={2} wrap="wrap">
             <Button label="需求与仓库" variant={tab === 'requirements' ? 'primary' : 'ghost'} onClick={() => setTab('requirements')} />
+            <Button label="待审核" variant={tab === 'reviews' ? 'primary' : 'ghost'}
+              isDisabled={!workspace} onClick={() => setTab('reviews')} />
             <Button label="Workspace 配置" variant={tab === 'settings' ? 'primary' : 'ghost'}
               isDisabled={!workspace} onClick={() => setTab('settings')} />
             <Button label="执行器" variant={tab === 'executors' ? 'primary' : 'ghost'} onClick={() => setTab('executors')} />
           </HStack>
           {error && <p role="alert">{error}</p>}
+          {tab === 'reviews' && <VStack as="section" gap={2}>
+            <Heading level={2}>待审核</Heading>
+            {inbox.length === 0 && <Text>当前 workspace 暂无待审核需求</Text>}
+            {inbox.length > 0 && <table>
+              <thead><tr><th scope="col">需求</th><th scope="col">SOP</th><th scope="col">审核节点</th></tr></thead>
+              <tbody>{inbox.map(item => <tr key={item.id}>
+                <td><Button label={item.title} variant="ghost" onClick={() => setOpened(item.id)} /></td>
+                <td>{item.sop}{item.version ? ` · v${item.version}` : ''}</td>
+                <td>{item.node_name}</td>
+              </tr>)}</tbody>
+            </table>}
+          </VStack>}
           {tab === 'settings' && workspace && <WorkspaceSettings key={workspace} workspace={workspace}
             setup={setup} request={request} refresh={refreshSetup} />}
           {tab === 'executors' && <Executors entries={executors} onManage={mutate} />}
@@ -234,8 +295,8 @@ function Console() {
                 <label>需求说明 <textarea name="description" required /></label>
                 <input type="hidden" name="engine" value="codex" />
                 <label>SOP <select name="sop" defaultValue="" required>
-                  <option value="">{setup.sops.length ? '选择 SOP' : '请先在 Workspace 配置中创建 SOP'}</option>
-                  {setup.sops.map(sop => <option key={sop.id} value={sop.id}>{sop.name}</option>)}
+                  <option value="">{publishedSOPs.length ? '选择已发布 SOP' : '请先发布 SOP'}</option>
+                  {publishedSOPs.map(sop => <option key={sop.id} value={sop.id}>{sop.published_name} · v{sop.published_version}</option>)}
                 </select></label>
                 <fieldset><legend>关联仓库</legend>
                   <VStack gap={1}>{repositories.map(repo => <label key={repo.id}>

@@ -3,15 +3,14 @@
   "version": "1.0.0",
   "description": "",
   "directories": {
-    "doc": "docs",
-    "test": "tests"
+    "doc": "docs"
   },
   "scripts": {
-    "test": "python3 -m unittest discover -s tests",
-    "build": "esbuild frontend/Console.jsx --bundle --jsx=automatic --minify --loader:.woff2=dataurl --outfile=public/app.js",
-    "start": "python3 server.py",
-    "worker": "python3 delivery.py worker",
-    "executor": "python3 executor.py start"
+    "test": "npm run build && CGO_ENABLED=1 CGO_CFLAGS=\"-O1 -g0\" AIDEV_TEST_BINARY=\"$PWD/bin/ai-dev\" go test -trimpath -tags netgo,osusergo,sqlite_omit_load_extension -count=1 ./...",
+    "build": "npm run build:ui && mkdir -p bin && CGO_ENABLED=1 CGO_CFLAGS=\"-O1 -g0\" go build -trimpath -tags netgo,osusergo,sqlite_omit_load_extension -ldflags \"-linkmode external -extldflags -static\" -o bin/ai-dev .",
+    "start": "./bin/ai-dev serve",
+    "executor": "./bin/ai-dev executor",
+    "build:ui": "esbuild frontend/Console.jsx --bundle --jsx=automatic --minify --loader:.woff2=dataurl --outfile=public/app.js"
   },
   "repository": {
     "type": "git",

@@ -152,10 +152,22 @@ export function WorkspaceSettings({workspace, setup, request, refresh}) {
         <Heading level={3}>SOP</Heading>
         <Button label="新建 SOP" onClick={() => editSop({name: '', nodes: []})} />
       </HStack>
-      {setup.sops.map(entry => <HStack key={entry.id} gap={2} vAlign="center">
-        <Text>{entry.name}</Text>
-        <Button label={'编辑 ' + entry.name} size="sm" variant="ghost" onClick={() => editSop(entry)} />
-      </HStack>)}
+      {setup.sops.map(entry => <VStack key={entry.id} gap={1}>
+        <HStack gap={2} wrap="wrap" vAlign="center">
+          <Text>{entry.name} · 草稿{entry.published_version ? ` / 最新发布 ${entry.published_name} v${entry.published_version}` : ''}</Text>
+          <Button label={'编辑 ' + entry.name} size="sm" variant="ghost" onClick={() => editSop(entry)} />
+          <Button label="发布新版本" size="sm" isDisabled={busy} onClick={() =>
+            submit('/api/sops/publish', {identifier: entry.id}, async result => {
+              setNotice(`已发布 v${result.version}`);
+              await refresh();
+            })} />
+        </HStack>
+        {entry.versions.length > 0 && <details><summary>已发布版本</summary>
+          <ol reversed>{entry.versions.map(version => <li key={version.version}>
+            v{version.version} · {version.name} · {new Date(version.published * 1000).toLocaleString()}
+          </li>)}</ol>
+        </details>}
+      </VStack>)}
       {sop && <VStack gap={3}>
         <label>SOP 名称 <input value={sop.name} onChange={event => setSop({...sop, name: event.target.value})} /></label>
         <form onSubmit={event => {
@@ -216,6 +228,11 @@ export function WorkspaceSettings({workspace, setup, request, refresh}) {
                     <option value="">选择 Agent</option>
                     {agents.map(agent => <option key={agent.id} value={agent.id}>{agent.name}</option>)}
                   </select></label>
+                  <label>文本产物路径（相对仓库根目录，每行一个）
+                    <textarea key={draft || history.length} defaultValue={node.artifacts?.join('\n')}
+                      onChange={event => updateNode(node.id,
+                        {artifacts: event.target.value.split('\n').map(path => path.trim()).filter(Boolean)})} />
+                  </label>
                   <label><input type="checkbox" checked={Boolean(node.publish)}
                     onChange={event => updateNode(node.id, {publish: event.target.checked})} /> 推送分支并创建 PR／MR</label>
                 </>}
@@ -240,13 +257,13 @@ export function WorkspaceSettings({workspace, setup, request, refresh}) {
         </ol>
         <HStack gap={2} wrap="wrap">
           <Button label="添加节点" onClick={() => setSop({...sop, nodes: [...sop.nodes, newNode()]})} />
-          <Button label="保存 SOP" variant="primary" isDisabled={busy || Boolean(draft)} onClick={() =>
+          <Button label="保存草稿" variant="primary" isDisabled={busy || Boolean(draft)} onClick={() =>
             submit('/api/sops', {identifier: sop.id, name: sop.name, nodes: sop.nodes}, async () => {
               editSop(null);
               await refresh();
             })} />
           <Button label="关闭" onClick={() => editSop(null)} />
-          {sop.id && <Button label="删除 SOP" variant="destructive" isDisabled={busy} onClick={() => {
+          {sop.id && !sop.published_version && <Button label="删除草稿" variant="destructive" isDisabled={busy} onClick={() => {
             if (window.confirm('删除 SOP？')) submit('/api/sops/delete', {identifier: sop.id},
               async () => {editSop(null); await refresh();});
           }} />}
