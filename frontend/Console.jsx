@@ -2,12 +2,15 @@ import {Fragment, useCallback, useEffect, useRef, useState} from 'react';
 import {createRoot} from 'react-dom/client';
 import '@astryxdesign/core/reset.css';
 import '@astryxdesign/core/astryx.css';
+import {Drawer, DrawerHeader} from '@astryxdesign/core/Drawer';
+import {Layout, LayoutContent} from '@astryxdesign/core/Layout';
 import {Button} from '@astryxdesign/core/Button';
 import {Heading} from '@astryxdesign/core/Heading';
 import {HStack} from '@astryxdesign/core/HStack';
 import {Text} from '@astryxdesign/core/Text';
 import {VStack} from '@astryxdesign/core/VStack';
 import {Theme} from '@astryxdesign/core/theme';
+import {DeliveryDemo} from './DeliveryDemo.jsx';
 import {Executors, WorkspaceSettings} from './Workflow.jsx';
 import {themes, defaultThemeSlug} from '../astryx-themes.js';
 import './console.css';
@@ -29,7 +32,7 @@ async function request(path, payload) {
   return result;
 }
 
-function Artifact({artifact, repositories}) {
+function Artifact({artifact, repositories, nodes}) {
   const {files = [], output, commits, reviews, decision, note, return_to: returnTo, error, ...metadata} = artifact;
   const repoName = id => repositories.find(repo => repo.id === id)?.url.split('/').at(-1).replace(/\.git$/, '') || id;
   const decisionLabels = {approved: '已通过', rejected: '已终止', returned: '已退回'};
@@ -37,7 +40,7 @@ function Artifact({artifact, repositories}) {
     {output && <pre className="console-output">{output}</pre>}
     {error && <p className="console-error">{error}</p>}
     {(decision || note) && <p>{[decisionLabels[decision] || decision, note].filter(Boolean).join(' · ')}</p>}
-    {returnTo && <Text type="supporting">退回节点：{returnTo}</Text>}
+    {returnTo && <Text type="supporting">退回节点：{nodes.find(node => node.id === returnTo)?.name ?? returnTo}</Text>}
     {files.map(file => <details key={file.repository + '/' + file.path}>
       <summary>{file.path} · {file.repository}</summary>
       <pre className="console-output">{file.content}</pre>
@@ -94,6 +97,7 @@ const navigation = [
   {id: 'reviews', label: '待审核', needsWorkspace: true},
   {id: 'settings', label: 'Workspace 配置', needsWorkspace: true},
   {id: 'executors', label: '执行器'},
+  {id: 'demo', label: '观看演示'},
 ];
 
 const nodeStates = {
@@ -182,6 +186,57 @@ function Requirements({workspace, repositories, requirements, publishedSOPs, pen
   </>;
 }
 
+const attemptStates = {done: '完成', failed: '失败', returned: '退回返工', rejected: '终止'};
+
+function RunNodes({nodes, repositories}) {
+  const [selected, setSelected] = useState('');
+  const [isOpen, setIsOpen] = useState(false);
+  const node = nodes.find(item => item.id === selected);
+
+  return <VStack gap={2}>
+    <Heading level={3}>SOP 节点</Heading>
+    <ol className="console-timeline">
+      {nodes.map(item => <li key={item.id}>
+        <HStack gap={2} wrap="wrap" vAlign="center">
+          <Button label={item.name} variant="ghost" aria-haspopup="dialog"
+            onClick={() => {setSelected(item.id); setIsOpen(true);}} />
+          <Status value={item.status} labels={nodeStates} />
+        </HStack>
+      </li>)}
+    </ol>
+    <Drawer isOpen={isOpen && Boolean(node)} onOpenChange={setIsOpen} label="节点详情"
+      width="32rem" experimental={{isFullWidthOnMobile: true}}>
+      {node && <Layout key={node.id}
+        header={<DrawerHeader title={node.name} onOpenChange={setIsOpen} />}
+        content={<LayoutContent isScrollable>
+          <VStack gap={3}>
+            <Status value={node.status} labels={nodeStates} />
+            {node.prompt && <section>
+              <Heading level={4}>节点指令</Heading>
+              <p className="console-output">{node.prompt}</p>
+            </section>}
+            <section>
+              <Heading level={4}>执行记录</Heading>
+              {node.attempts?.length > 0 ? (
+                <ol className="console-timeline" reversed>
+                  {node.attempts.map((attempt, index) => <li key={attempt.id}>
+                    <details open={index === 0}>
+                      <summary>第 {node.attempts.length - index} 次 · {attemptStates[attempt.status] || attempt.status}</summary>
+                      <Artifact artifact={attempt.artifact ?? {}} repositories={repositories} nodes={nodes} />
+                    </details>
+                  </li>)}
+                </ol>
+              ) : node.artifact ? (
+                <Artifact artifact={node.artifact} repositories={repositories} nodes={nodes} />
+              ) : <Text type="supporting">暂无执行记录</Text>}
+            </section>
+          </VStack>
+        </LayoutContent>}
+      />}
+    </Drawer>
+  </VStack>;
+}
+
 function RequirementDetail({detail, pending, mutate, setError, onClose}) {
   const panel = useRef(null);
   useEffect(() => {
@@ -201,24 +256,7 @@ function RequirementDetail({detail, pending, mutate, setError, onClose}) {
           <Text>{detail.description}</Text>
           {detail.sop && <VStack gap={2}>
             <Heading level={3}>{detail.sop}{detail.sop_version ? ` · v${detail.sop_version}` : ''}</Heading>
-            <ol className="console-timeline">{detail.nodes.map(node => <li key={node.id}>
-              <HStack gap={2} wrap="wrap" vAlign="center"><Text>{node.name}</Text>
-                <Status value={node.status} labels={nodeStates} />
-              </HStack>
-              {node.prompt && <Text>{node.prompt}</Text>}
-              {node.attempts?.length > 0 && <details><summary>执行记录（{node.attempts.length}）</summary>
-                <ol reversed>{node.attempts.map((attempt, index) => <li key={attempt.id}>
-                  <details><summary>第 {node.attempts.length - index} 次 · {{
-                    done: '完成', failed: '失败', returned: '退回', rejected: '终止',
-                  }[attempt.status] || attempt.status}</summary>
-                    <Artifact artifact={attempt.artifact || {}} repositories={detail.targets} />
-                  </details>
-                </li>)}</ol>
-              </details>}
-              {!node.attempts?.length && node.artifact && <details><summary>查看节点产物</summary>
-                <Artifact artifact={node.artifact} repositories={detail.targets} />
-              </details>}
-            </li>)}</ol>
+            <RunNodes key={detail.id} nodes={detail.nodes} repositories={detail.targets} />
             {detail.status === 'sop_review' && <ReviewForm key={detail.id + '/' + detail.review_node} detail={detail} pending={pending}
               onReview={payload => payload
                 ? mutate('/api/requirements/' + detail.id + '/review', payload)
@@ -384,7 +422,7 @@ function Console() {
               aria-expanded={form === 'requirement'} isDisabled={!repositories.length || !publishedSOPs.length}
               onClick={() => setForm(current => current === 'requirement' ? '' : 'requirement')} />}
           </header>
-          {error && <p className="console-error" role="alert">{error}</p>}
+          {tab !== 'demo' && error && <p className="console-error" role="alert">{error}</p>}
           <section className={showDetail ? 'console-columns with-detail' : 'console-columns'}>
             <VStack gap={4} className="console-content">
               {tab === 'requirements' && <Requirements
@@ -405,6 +443,7 @@ function Console() {
               {tab === 'settings' && workspace && <WorkspaceSettings key={workspace} workspace={workspace}
                 setup={setup} repositories={repositories} request={request} refresh={refreshSetup}
                 refreshRepositories={async () => setData(await request('/api'))} />}
+              {tab === 'demo' && <DeliveryDemo onExit={() => setTab('requirements')} />}
               {tab === 'executors' && <Executors entries={executors} onManage={mutate} />}
             </VStack>
             {showDetail && <RequirementDetail detail={detail} pending={pending} mutate={mutate}
